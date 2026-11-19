@@ -13,6 +13,7 @@ from google.adk import runners
 from google.adk.plugins import base_plugin
 
 from core.utils import chat_with_agent
+from guardrails.text_security import find_protected_kinds, plain_secret_spans, secret_groups
 
 
 # ============================================================
@@ -27,38 +28,117 @@ from core.utils import chat_with_agent
 # - "redacted": cleaned response (PII replaced with [REDACTED])
 # ============================================================
 
+REDACTED = "[REDACTED]"
+
+# Email chính thức của VinBank (data/pii_hallucination_samples.json -> ground_truth)
+# không phải thông tin cá nhân nên không che.
+_OFFICIAL_EMAILS = {"support@vinbank.example"}
+
+_PHONE_RE = re.compile(r"(?<![\d.,])(?:\+84|0)(?:[\s.-]?\d){9,10}(?!\d)")
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_NATIONAL_ID_RE = re.compile(
+    r"(?<![\d.,+-])(?:\d{12}|\d{9})(?!\d)(?!\s*(?:vnd|vnđ|đ|₫|dong|đồng|usd|\$))", re.IGNORECASE
+)
+_API_KEY_RE = re.compile(
+    r"\b(?:sk|pk|rk)[-_][A-Za-z0-9_-]{6,}|\bAIza[0-9A-Za-z_-]{30,}|\bAKIA[0-9A-Z]{16}\b|"
+    r"\bgh[pousr]_[A-Za-z0-9]{20,}|\bxox[abp]-[A-Za-z0-9-]{10,}|\bBearer\s+[A-Za-z0-9._~+/-]{16,}"
+)
+_PASSWORD_RE = re.compile(
+    r"(?P<label>\b(?:pass(?:word|wd|code|phrase)?|pwd|mat\s*khau|mật\s*khẩu)\b\s*(?:is|are|là|:|=|-)\s*)"
+    r"[\"'`]?(?P<value>[^\s\"'`,;]+)",
+    re.IGNORECASE,
+)
+_INTERNAL_HOST_RE = re.compile(
+    r"\b[\w-]+(?:\.[\w-]+)*\.internal(?::\d+)?\b|\b(?:postgres(?:ql)?|mysql|mongodb|redis|amqp)://\S+",
+    re.IGNORECASE,
+)
+
+_SECRET_KINDS = ("password", "api_key", "internal_host")
+
+
+def _has_digit_or_symbol(token: str) -> bool:
+    return any(not c.isalpha() for c in token)
+
+
+def _sub_count(pattern: re.Pattern, text: str, repl) -> tuple[str, int]:
+    count = 0
+
+    def _wrap(m: re.Match) -> str:
+        nonlocal count
+        out = repl(m)
+        if out != m.group(0):
+            count += 1
+        return out
+
+    return pattern.sub(_wrap, text), count
+
+
 def content_filter(response: str) -> dict:
     """Filter response for PII, secrets, and harmful content.
+
+    Che: SĐT VN, email, CCCD/CMND, API key, mật khẩu, host nội bộ, và mọi giá trị
+    trong data/protected (kể cả khi bị mã hóa base64/hex/ROT13/đảo chuỗi/tách ký tự).
 
     Args:
         response: The LLM's response text
 
     Returns:
         dict with 'safe', 'issues', and 'redacted' keys
+        (thêm 'secret_leak': True nếu có bí mật hệ thống — plugin sẽ chặn cả câu)
     """
-    issues = []
+    response = response or ""
     redacted = response
+    found: dict[str, int] = {}
 
-    # PII patterns to check
-    PII_PATTERNS = {
-        # TODO: Add regex patterns for:
-        # - VN phone number: r"0\d{9,10}"
-        # - Email: r"[\w.-]+@[\w.-]+\.[a-zA-Z]{2,}"
-        # - National ID (CMND/CCCD): r"\b\d{9}\b|\b\d{12}\b"
-        # - API key pattern: r"sk-[a-zA-Z0-9-]+"
-        # - Password pattern: r"password\s*[:=]\s*\S+"
-    }
+    def note(kind: str, n: int) -> None:
+        if n:
+            found[kind] = found.get(kind, 0) + n
 
-    for name, pattern in PII_PATTERNS.items():
-        matches = re.findall(pattern, response, re.IGNORECASE)
-        if matches:
-            issues.append(f"{name}: {len(matches)} found")
-            redacted = re.sub(pattern, "[REDACTED]", redacted, flags=re.IGNORECASE)
+    # 1. Bí mật dạng cấu trúc (key, password=..., host nội bộ)
+    redacted, n = _sub_count(_API_KEY_RE, redacted, lambda m: REDACTED)
+    note("api_key", n)
+    redacted, n = _sub_count(
+        _PASSWORD_RE,
+        redacted,
+        lambda m: m.group("label") + REDACTED
+        if _has_digit_or_symbol(m.group("value")) and m.group("value") != REDACTED
+        else m.group(0),
+    )
+    note("password", n)
+    redacted, n = _sub_count(_INTERNAL_HOST_RE, redacted, lambda m: REDACTED)
+    note("internal_host", n)
 
+    # 2. Giá trị bảo vệ nguyên văn (đối chiếu với data/protected/vinbank_secrets.json)
+    kinds_by_value = {v.lower(): kind for kind, vals in secret_groups().items() for v in vals if len(v) >= 6}
+    for m in sorted(plain_secret_spans(redacted), key=lambda x: -x.start()):
+        kind = kinds_by_value.get(m.group(0).lower(), "password")
+        note(kind, 1)
+        redacted = redacted[: m.start()] + REDACTED + redacted[m.end() :]
+
+    # 3. Giá trị bảo vệ bị che giấu (base64/hex/ROT13/đảo chuỗi/tách ký tự/chữ số bằng chữ)
+    hidden = find_protected_kinds(redacted)
+    if hidden:
+        for kind in sorted(hidden):
+            note("encoded_" + kind, 1)
+        redacted = REDACTED  # không thể che chính xác chỗ -> che cả câu
+
+    # 4. PII
+    redacted, n = _sub_count(_PHONE_RE, redacted, lambda m: REDACTED)
+    note("phone", n)
+    redacted, n = _sub_count(
+        _EMAIL_RE, redacted, lambda m: m.group(0) if m.group(0).lower() in _OFFICIAL_EMAILS else REDACTED
+    )
+    note("email", n)
+    redacted, n = _sub_count(_NATIONAL_ID_RE, redacted, lambda m: REDACTED)
+    note("national_id", n)
+
+    issues = [f"{kind}: {count} found" for kind, count in found.items()]
+    secret_leak = any(k in found or ("encoded_" + k) in found for k in _SECRET_KINDS)
     return {
         "safe": len(issues) == 0,
         "issues": issues,
         "redacted": redacted,
+        "secret_leak": secret_leak,
     }
 
 
@@ -143,12 +223,19 @@ async def llm_safety_check(response_text: str) -> dict:
 class OutputGuardrailPlugin(base_plugin.BasePlugin):
     """Plugin that checks agent output before sending to user."""
 
+    SAFE_MESSAGE = (
+        "I'm sorry, I can't share that information. "
+        "How else can I help with your VinBank account or banking needs?"
+    )
+
     def __init__(self, use_llm_judge=True):
         super().__init__(name="output_guardrail")
         self.use_llm_judge = use_llm_judge and (safety_judge_agent is not None)
         self.blocked_count = 0
         self.redacted_count = 0
         self.total_count = 0
+        self.last_action: str | None = None  # "blocked" | "redacted" | None (cho audit)
+        self.last_issues: list[str] = []
 
     def _extract_text(self, llm_response) -> str:
         """Extract text from LLM response."""
@@ -172,16 +259,40 @@ class OutputGuardrailPlugin(base_plugin.BasePlugin):
         if not response_text:
             return llm_response
 
-        # TODO: Implement logic:
-        # 1. Call content_filter(response_text)
-        #    - If issues found: replace llm_response.content with redacted version
-        #    - Increment self.redacted_count
-        # 2. If use_llm_judge: call llm_safety_check(response_text)
-        #    - If unsafe: replace llm_response.content with a safe message
-        #    - Increment self.blocked_count
-        # 3. Return llm_response (possibly modified)
+        self.last_action = None
+        self.last_issues = []
 
-        return llm_response  # TODO: modify if needed
+        # 1. Regex + đối chiếu giá trị bảo vệ
+        result = content_filter(response_text)
+        if not result["safe"]:
+            self.last_issues = result["issues"]
+            if result.get("secret_leak"):
+                # Bí mật hệ thống: không cố vá từng chỗ, thay cả câu trả lời.
+                self.blocked_count += 1
+                self.last_action = "blocked"
+                self._replace(llm_response, self.SAFE_MESSAGE)
+                return llm_response
+            # PII thường (SĐT, email, CCCD...): che rồi cho đi tiếp.
+            self.redacted_count += 1
+            self.last_action = "redacted"
+            self._replace(llm_response, result["redacted"])
+
+        # 2. LLM-as-Judge (tuỳ chọn, mặc định tắt)
+        if self.use_llm_judge:
+            verdict = await llm_safety_check(self._extract_text(llm_response))
+            if not verdict["safe"]:
+                self.blocked_count += 1
+                self.last_action = "blocked"
+                self.last_issues = self.last_issues + ["judge: unsafe"]
+                self._replace(llm_response, self.SAFE_MESSAGE)
+
+        return llm_response
+
+    @staticmethod
+    def _replace(llm_response, text: str) -> None:
+        llm_response.content = types.Content(
+            role="model", parts=[types.Part.from_text(text=text)]
+        )
 
 
 # ============================================================

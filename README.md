@@ -1,3 +1,55 @@
+# Bài làm Day 11 — Ngô Huy Hoàng
+
+- Họ tên: Ngô Huy Hoàng (NgoHuyHoang)
+- MSSV: 2A202603622
+- Lớp: L3A
+- Repo nộp: `K5-L3A-DAY11-NgoHuyHoang-2A202603622-Guardrails-HITL-Responsible-AI` (đặt tên theo SUBMISSION.md; README và RULES của đề vẫn ghi tiền tố K4)
+
+## Cách chạy
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+Copy-Item .env.example .env   # điền OPENROUTER_API_KEY và key Gemini/OpenAI
+python src/main.py --part 2
+python src/main.py --part 3
+python src/main.py --part 4
+python scripts/grade.py --submission-dir . --out outputs/grade_report.json
+```
+
+## Em đã làm gì
+
+- **Input guardrail** (`src/guardrails/input_guardrails.py`): chuẩn hóa câu (Unicode, ký tự vô hình, bỏ dấu tiếng Việt, leetspeak, chữ tách rời), giải mã base64/hex/ROT13/chuỗi đảo rồi chạy bộ luật cụm từ trên mọi phiên bản. Chặn thêm khi người dùng tự dán giá trị trong `data/protected`. Có lọc chủ đề và giới hạn độ dài.
+- **Output guardrail** (`output_guardrails.py`): che SĐT, email, CCCD/CMND, API key, mật khẩu, host nội bộ. Nếu câu trả lời chứa secret của hệ thống (kể cả dạng mã hóa) thì thay cả câu bằng lời từ chối.
+- **Dùng chung** (`text_security.py`): các hàm chuẩn hóa/giải mã/đối chiếu secret, input, output và egress đều dùng lại.
+- **Pipeline** (`src/assignment/`): rate limit cửa sổ trượt, audit log, metrics + alert, thứ tự RateLimit → Input → Output, egress chỉ cho HTTPS tới đúng hai host VinBank và không có secret/PII trong payload.
+- **Red** (`src/attacks/attacks.py`): 5 prompt tấn công, mỗi prompt một kỹ thuật.
+
+## Kết quả thật (từ file trong `outputs/`)
+
+| Phần | Kết quả |
+|------|---------|
+| Câu banking an toàn bị chặn nhầm | 0 / 6 |
+| Câu tấn công bị chặn | 11 / 12 (câu còn lại lọt qua input nhưng model Blue tự từ chối) |
+| Rate limit | gửi 15, qua 10, chặn 5 |
+| Edge case bị chặn | 6 / 7 (câu tiếng Việt hợp lệ vẫn được trả lời) |
+| Red lộ secret | 5 / 5 |
+| Red Advance lộ secret | 0 / 5 (cả 5 bị regex lọc chủ đề chặn, chưa tới NeMo) |
+| `pytest tests/smoke`, `tests/public` | 39 passed, 10 passed |
+
+## Lưu ý
+
+- Gemini bản `gemini-3.5-flash` bị 503 rồi hết hạn mức free theo ngày, nên CP4 em đổi `GEMINI_MODEL` trong `.env` sang `gemini-3.5-flash-lite`. `attack_results.json` ghi đúng model này. Em chưa kiểm chứng việc lộ secret trên `gemini-3.5-flash`.
+- Lớp output của Blue chưa bị kích hoạt trong bộ test của em, vì mọi câu tấn công đều bị chặn ở input hoặc model tự từ chối. Em kiểm tra riêng lớp này bằng các chuỗi mẫu (base64, hex, ROT13, đảo chuỗi).
+- Bộ luật là regex và chuẩn hóa văn bản, nên một cách diễn đạt mới hoàn toàn vẫn có thể lọt.
+
+## Khai báo dùng AI
+
+Em dùng Claude Code để hỗ trợ viết code guardrails, pipeline và chạy kiểm tra. 5 prompt tấn công Red trong `src/attacks/attacks.py` do AI soạn nháp, không phải em viết từ đầu. Các file trong `outputs/` đều do lệnh của lab sinh ra, không sửa tay.
+
+---
+
 # Day 11 — Controlled Agent Security (2026)
 
 > 👤 **Hình thức:** bài tập **cá nhân** (1 người / 1 MSSV).  
