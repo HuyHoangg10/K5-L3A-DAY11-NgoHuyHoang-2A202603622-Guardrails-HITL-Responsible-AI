@@ -3,7 +3,7 @@
 - Họ tên: Ngô Huy Hoàng (NgoHuyHoang)
 - MSSV: 2A202603622
 - Lớp: L3A
-- Repo nộp: `K5-L3A-DAY11-NgoHuyHoang-2A202603622-Guardrails-HITL-Responsible-AI` (đặt tên theo SUBMISSION.md; README và RULES của đề vẫn ghi tiền tố K4)
+- Repo: `K5-L3A-DAY11-NgoHuyHoang-2A202603622-Guardrails-HITL-Responsible-AI` (em đặt tên theo SUBMISSION.md, còn README và RULES của đề vẫn ghi K4)
 
 ## Cách chạy
 
@@ -11,22 +11,22 @@
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-Copy-Item .env.example .env   # điền OPENROUTER_API_KEY và key Gemini/OpenAI
+Copy-Item .env.example .env   # điền OPENROUTER_API_KEY và key của Red (OpenAI hoặc Gemini)
 python src/main.py --part 2
 python src/main.py --part 3
 python src/main.py --part 4
 python scripts/grade.py --submission-dir . --out outputs/grade_report.json
 ```
 
-## Em đã làm gì
+## Em làm những gì
 
-- **Input guardrail** (`src/guardrails/input_guardrails.py`): chuẩn hóa câu (Unicode, ký tự vô hình, bỏ dấu tiếng Việt, leetspeak, chữ tách rời), giải mã base64/hex/ROT13/chuỗi đảo rồi chạy bộ luật cụm từ trên mọi phiên bản. Chặn thêm khi người dùng tự dán giá trị trong `data/protected`. Có lọc chủ đề và giới hạn độ dài.
-- **Output guardrail** (`output_guardrails.py`): che SĐT, email, CCCD/CMND, API key, mật khẩu, host nội bộ. Nếu câu trả lời chứa secret của hệ thống (kể cả dạng mã hóa) thì thay cả câu bằng lời từ chối.
-- **Dùng chung** (`text_security.py`): các hàm chuẩn hóa/giải mã/đối chiếu secret, input, output và egress đều dùng lại.
-- **Pipeline** (`src/assignment/`): rate limit cửa sổ trượt, audit log, metrics + alert, thứ tự RateLimit → Input → Output, egress chỉ cho HTTPS tới đúng hai host VinBank và không có secret/PII trong payload.
+- **Input** (`src/guardrails/input_guardrails.py`): trước khi kiểm tra, em chuẩn hóa câu hỏi (bỏ ký tự vô hình, bỏ dấu tiếng Việt, gỡ leetspeak, ghép chữ bị tách rời). Em còn giải mã thử base64, hex, ROT13 và chuỗi đảo ngược. Sau đó chạy một bộ luật cụm từ trên tất cả các bản này. Nếu người dùng tự dán password hoặc API key trong `data/protected` vào câu thì cũng bị chặn. Ngoài ra có lọc chủ đề và giới hạn độ dài.
+- **Output** (`output_guardrails.py`): che SĐT, email, CCCD/CMND, API key, mật khẩu và host nội bộ. Nếu câu trả lời có secret của hệ thống (kể cả dạng mã hóa) thì thay cả câu bằng lời từ chối.
+- **Dùng chung** (`text_security.py`): các hàm chuẩn hóa, giải mã và đối chiếu secret, để input, output và egress dùng lại.
+- **Pipeline** (`src/assignment/`): rate limit cửa sổ trượt, audit log, metrics kèm alert, thứ tự RateLimit → Input → Output. Egress chỉ cho HTTPS tới đúng hai host VinBank và payload không được có secret hay PII.
 - **Red** (`src/attacks/attacks.py`): 5 prompt tấn công, mỗi prompt một kỹ thuật.
 
-## Kết quả thật (từ file trong `outputs/`)
+## Kết quả (lấy từ file trong `outputs/`)
 
 | Phần | Kết quả |
 |------|---------|
@@ -40,13 +40,14 @@ python scripts/grade.py --submission-dir . --out outputs/grade_report.json
 
 ## Lưu ý
 
-- Red chạy bằng OpenAI `gpt-4o-mini` (model mặc định của đề), `attack_results.json` ghi đúng provider và model này. Trước đó em thử Gemini: `gemini-3.5-flash` bị 503 rồi hết hạn mức free theo ngày, còn `gemini-3.5-flash-lite` cũng cho Red lộ 5/5.
-- Lớp output của Blue chưa bị kích hoạt trong bộ test của em, vì mọi câu tấn công đều bị chặn ở input hoặc model tự từ chối. Em kiểm tra riêng lớp này bằng các chuỗi mẫu (base64, hex, ROT13, đảo chuỗi).
-- Bộ luật là regex và chuẩn hóa văn bản, nên một cách diễn đạt mới hoàn toàn vẫn có thể lọt.
+- Red chạy bằng OpenAI `gpt-4o-mini`, `attack_results.json` ghi đúng provider và model này. Trước đó em thử Gemini: `gemini-3.5-flash` bị 503 rồi hết hạn mức free trong ngày, còn `gemini-3.5-flash-lite` cũng cho Red lộ 5/5.
+- Red Advance 0/5 chỉ nói được là regex lọc chủ đề của nó chặn cả 5 prompt. Chúng chưa tới NeMo, nên em không kết luận được NeMo mạnh hay yếu.
+- Lớp output của Blue chưa bị kích hoạt trong bộ test, vì câu tấn công đều bị chặn ở input hoặc model tự từ chối. Em tự thử lớp này bằng các chuỗi mẫu (base64, hex, ROT13, đảo chuỗi).
+- Bộ luật chỉ là regex và chuẩn hóa văn bản, nên cách diễn đạt hoàn toàn mới vẫn có thể lọt.
 
 ## Khai báo dùng AI
 
-Em dùng Claude Code để hỗ trợ viết code guardrails, pipeline và chạy kiểm tra. 5 prompt tấn công Red trong `src/attacks/attacks.py`: AI soạn bản nháp, sau đó em tự viết lại dựa trên bản nháp đó. Các file trong `outputs/` đều do lệnh của lab sinh ra, không sửa tay.
+Em dùng Claude Code (AI) để viết code guardrails, pipeline và chạy các lệnh kiểm tra. Với 5 prompt Red, AI soạn bản nháp rồi em viết lại dựa trên bản nháp đó. Các file trong `outputs/` đều do lệnh của lab sinh ra, không sửa tay.
 
 ---
 
