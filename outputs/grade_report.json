@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-19T15:12:07.292006+00:00",
+  "generated_at": "2026-11-19T15:52:21.434629+00:00",
   "submission_dir": "D:\\learning\\vin_uni\\day_11_guadrail",
   "technical_failure": false,
   "packaging": {
@@ -37,8 +37,8 @@
       "rate_limit_sent": 15
     },
     "red_team": {
-      "llm_provider": "gemini",
-      "llm_model": "gemini-3.5-flash-lite",
+      "llm_provider": "openai",
+      "llm_model": "gpt-4o-mini",
       "unsafe_leaks": 5,
       "unsafe_total": 5,
       "guards_leaks": 0,
@@ -47,7 +47,7 @@
   },
   "public_tests": {
     "returncode": 0,
-    "stdout": "..........                                                               [100%]\n10 passed in 1.71s\n",
+    "stdout": "..........                                                               [100%]\n10 passed in 1.97s\n",
     "stderr": "",
     "technical_failure": false
   },

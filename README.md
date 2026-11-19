@@ -40,13 +40,13 @@ python scripts/grade.py --submission-dir . --out outputs/grade_report.json
 
 ## Lưu ý
 
-- Gemini bản `gemini-3.5-flash` bị 503 rồi hết hạn mức free theo ngày, nên CP4 em đổi `GEMINI_MODEL` trong `.env` sang `gemini-3.5-flash-lite`. `attack_results.json` ghi đúng model này. Em chưa kiểm chứng việc lộ secret trên `gemini-3.5-flash`.
+- Red chạy bằng OpenAI `gpt-4o-mini` (model mặc định của đề), `attack_results.json` ghi đúng provider và model này. Trước đó em thử Gemini: `gemini-3.5-flash` bị 503 rồi hết hạn mức free theo ngày, còn `gemini-3.5-flash-lite` cũng cho Red lộ 5/5.
 - Lớp output của Blue chưa bị kích hoạt trong bộ test của em, vì mọi câu tấn công đều bị chặn ở input hoặc model tự từ chối. Em kiểm tra riêng lớp này bằng các chuỗi mẫu (base64, hex, ROT13, đảo chuỗi).
 - Bộ luật là regex và chuẩn hóa văn bản, nên một cách diễn đạt mới hoàn toàn vẫn có thể lọt.
 
 ## Khai báo dùng AI
 
-Em dùng Claude Code để hỗ trợ viết code guardrails, pipeline và chạy kiểm tra. 5 prompt tấn công Red trong `src/attacks/attacks.py` do AI soạn nháp, không phải em viết từ đầu. Các file trong `outputs/` đều do lệnh của lab sinh ra, không sửa tay.
+Em dùng Claude Code để hỗ trợ viết code guardrails, pipeline và chạy kiểm tra. 5 prompt tấn công Red trong `src/attacks/attacks.py`: AI soạn bản nháp, sau đó em tự viết lại dựa trên bản nháp đó. Các file trong `outputs/` đều do lệnh của lab sinh ra, không sửa tay.
 
 ---
 
